@@ -1,0 +1,13 @@
+name: gguf_filename_inspector
+version: 0.1.0
+
+authors:
+  - Murad "Gness Erquint" Beybalaev <gness.na@gmail.com>
+
+targets:
+  gguf_filename_inspector:
+    main: src/gguf_filename_inspector.cr
+
+crystal: '>= 1.20.2'
+
+license: Unlicense
