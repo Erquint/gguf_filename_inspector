@@ -1,0 +1,163 @@
+# Workflow designed by Murad "Gness Erquint" Beybalaev and implemented with AI assistance from Qwen3.7-Max:thinking.
+
+# ==============================================================================
+# ARCHITECTURE: State-Reconciling Release Pipeline
+# ==============================================================================
+#
+# WHAT IT DOES:
+# Acts as a declarative reconciler between your repository's desired state
+# (the `version` field in `shard.yml`) and its actual published state (the
+# latest GitHub Release tag). It triggers a full test, build, and release
+# pipeline *only* when the shard version is strictly newer than the registry.
+#
+# HOW IT WORKS:
+# 1. Extracts versions and compares them using GNU `sort -V` (SemVer math).
+# 2. Gates a native build matrix behind a passing test suite. It uses an
+#    Alpine container (`musl` libc) for true Linux static linking, and native
+#    runners for Windows (MSVC) and macOS (Intel/ARM).
+# 3. Applies universal `--static --release --no-debug` flags to produce
+#    single-file, portable binaries across all platforms.
+# 4. Atomically creates the git tag and GitHub Release via the GitHub API at
+#    the very end, targeting the exact commit SHA that triggered the run.
+#
+# GUARANTEES:
+# - Idempotency: Pushing standard commits without advancing the version safely
+#   exits the pipeline in seconds without wasting compute.
+# - No Webhook Loops: Tags are created via the API, not `git push`, preventing
+#   cascading "tag push" trigger loops.
+# - No Collisions: Refuses to build if the shard version matches or is lower
+#   than the latest present release tag.
+#
+# BENEFITS & OPERATIONAL WORKFLOW:
+# - To release: advance `version` in `shard.yml`, commit and push.
+# - To pause/abort: Leave the version alone, or temporarily lower it in the
+#   shard file to halt the pipeline until you are ready.
+# - To recover from a bad release: Delete the GitHub release and its tag, fix
+#   the code, and push. The unchanged shard version will correctly trigger a
+#   rebuild because the registry state has been rolled back.
+# - Manual override: Use `workflow_dispatch` in the Actions tab to trigger the
+#   workflow without a push if shard version happens to be above last release.
+# ==============================================================================
+
+name: Build and Release
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+
+jobs:
+  # JOB 1: Reconcile State
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check Version
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract version from shard.yml
+          SHARD_VER=$(grep '^version:' shard.yml | awk '{print $2}' | tr -d '"' | tr -d "'")
+          
+          # Get latest release tag from GitHub (defaults to v0.0.0 if none exist)
+          LATEST_TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.0.0")
+          LATEST_VER=${LATEST_TAG#v} # Strip the 'v' prefix for comparison
+          
+          # GNU sort -V handles SemVer comparison correctly
+          HIGHER=$(printf "%s\n%s" "$LATEST_VER" "$SHARD_VER" | sort -V | tail -n 1)
+          
+          if [ "$HIGHER" = "$SHARD_VER" ] && [ "$SHARD_VER" != "$LATEST_VER" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "version=$SHARD_VER" >> $GITHUB_OUTPUT
+            echo "::notice::New version $SHARD_VER > $LATEST_VER. Proceeding to build."
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "::notice::Version $SHARD_VER is not newer than $LATEST_VER. Skipping."
+          fi
+
+  # JOB 2: Gatekeeper
+  test:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    container: crystallang/crystal:1.20.2-alpine-build
+    steps:
+      - uses: actions/checkout@v4
+      - run: shards install
+      - run: crystal spec
+
+  # JOB 3: Native Matrix Build
+  build:
+    needs: [check-version, test]
+    if: needs.check-version.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false # Let all platforms finish even if one fails
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            container: crystallang/crystal:1.20.2-alpine-build
+            postfix: "-nix"
+          - os: windows-latest
+            name: windows-x86_64
+            postfix: ".exe"
+          - os: macos-13
+            name: macos-x86_64
+            postfix: "-mac-intel"
+          - os: macos-14
+            name: macos-arm64
+            postfix: "-mac-arm64"
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Only install Crystal natively if we aren't using the Alpine-build container
+      - name: Install Crystal (Native Runners Only)
+        if: ${{ !matrix.container }}
+        uses: crystal-lang/install-crystal@v1
+        
+      - name: Install dependencies
+        run: shards install --production
+
+      - name: Prepare bin directory
+        run: mkdir bin # Can break if directory already exists, but .gitignore should prevent that.
+        
+      - name: Build binary
+        run: crystal build --static --release --no-debug --output ./bin/gguf_filename_inspector${{ matrix.postfix }} src/interface.cr
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ./bin/gguf_filename_inspector${{ matrix.postfix }}
+
+  # JOB 4: Atomic Publish
+  release:
+    needs: [check-version, build]
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create tags and releases
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true # Flattens all binaries into one folder
+          
+      - name: Create Tag and Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Creates the tag on THIS specific commit, avoiding webhook trigger loops
+          tag_name: v${{ needs.check-version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: artifacts/*
+          generate_release_notes: true
