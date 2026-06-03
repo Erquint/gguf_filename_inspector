@@ -31,17 +31,17 @@ module GGUFFilenameInspector
       /(?<=[ ._-])VL?(?=[ ._-])/i => "This filename may suggest this model can see visually if a multimodal sidecar \"mmproj\" file is loaded alongside.",
     },
     :storage_struct => {
-      /(?<=[ ._-])IQ(\d+)(?=[ ._-])/i                     => "I-Quant, not to be conflated with Importance Matrix (I-Matrix) or Integer quants.",
+      /(?<=[ ._-])IQ(\d+)(?=[ ._-])/i                     => "I-Quant, not to be conflated with Importance Matrix (I-Matrix) or Integer quants",
       /(?<=[ ._-])Q(\d+)\D(\d+)\D(\d+)\D(\d+)(?=[ ._-])/i => "Ancient",
       /(?<=[ ._-])Q(\d+)\D(\d+)(?=[ ._-])/i               => "Uniform",
-      /(?<=[ ._-])KQ(\d+)(?=[ ._-])/i                     => "K-Quant.",
-      /(?<=[ ._-])Q(\d+)[ ._-]K(?=[ ._-])/i               => "K-Quant.",
+      /(?<=[ ._-])KQ(\d+)(?=[ ._-])/i                     => "K-Quant",
+      /(?<=[ ._-])Q(\d+)[ ._-]K(?=[ ._-])/i               => "K-Quant",
       /(?<=[ ._-])BF(\d+)(?=[ ._-])/i                     => "Brain Float",
       /(?<=[ ._-])F(\d+)(?=[ ._-])/i                      => "Float",
       /(?<=[ ._-])MXFP(\d+)(?=[ ._-])/i                   => "Microscaling Floating-Point",
       /(?<=[ ._-])FP(\d+)(?=[ ._-])/i                     => "Float",
       /(?<=[ ._-])I(\d+)(?=[ ._-])/i                      => "Integer",
-      /(?<=[ ._-])T(\d+)(?=[ ._-])/i                      => "Ternary.",
+      /(?<=[ ._-])T(\d+)(?=[ ._-])/i                      => "Ternary",
     },
     # # Compression distribution.
     # /\b(?:_\d)+\b/i            => "Uniform distribution of weights compression.",
@@ -123,7 +123,7 @@ module GGUFFilenameInspector
       if match_data = filename.match pattern
         number_text = match_data[1]
         stream.puts "  Quantized model weights may be represented with different numerical structures in memory.",
-             "    #{match_data[0]} : The algorithm and memory structure used in this file is #{structure}",
+             "    #{match_data[0]} : The algorithm and memory structure used in this file is #{structure}.",
              "  The number of bits allocated per each weight defines fidelity preserved in quantizing this model file.",
              "    #{match_data[0]} : The first number suggests that most of the weights in this model are encoded with #{number_text} BPW (bits per weight). The number is #{number_text} BPW."
         break
