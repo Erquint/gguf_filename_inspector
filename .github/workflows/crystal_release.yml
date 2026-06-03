@@ -54,7 +54,7 @@ jobs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Check Version
         id: check
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     container: crystallang/crystal:1.20.2-alpine-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: shards install
       - run: crystal spec
 
@@ -115,7 +115,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       # Only install Crystal natively if we aren't using the Alpine-build container
       - name: Install Crystal (Native Runners Only)
@@ -132,10 +132,11 @@ jobs:
         run: crystal build --static --release --no-debug --output ./bin/gguf_filename_inspector${{ matrix.postfix }} src/interface.cr
         
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: ./bin/gguf_filename_inspector${{ matrix.postfix }}
+          archive: false # Skips zip compression, preserves native executable permissions
 
   # JOB 4: Atomic Publish
   release:
@@ -145,16 +146,16 @@ jobs:
     permissions:
       contents: write # Required to create tags and releases
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true # Flattens all binaries into one folder
           
       - name: Create Tag and Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Creates the tag on THIS specific commit, avoiding webhook trigger loops
           tag_name: v${{ needs.check-version.outputs.version }}
